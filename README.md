@@ -5,8 +5,13 @@ However, toss is unique in that it allows users to recover the most recently tos
 ## Get Started
 1. Navigate into TossBin
 2. Run `make toss`
-3. Run `./setup.sh` to set binary to environment and set up crontab for automatic deletion
-4. Run `toss` to get started
+3. Run `chmod +x setup.sh` to give execute permissions to the setup script 
+4. Run `./setup.sh` to set the toss binary to your user environment and set up crontab for automatic deletion
+5. Run `toss` to get started
+
+## How to Uninstall
+1. Run `chmod +x uninstall.sh` to give execute permissions to the uninstall script
+2. Run `./uninstall.sh` to remove all related components: toss binary, recycle bin, and crontab
 
 ## What can it do?
 1. Toss and recover files and directories
