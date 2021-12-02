@@ -15,11 +15,19 @@
 #include <argparse/argparse.hpp>
 using namespace std;
 
-struct File {
+class toss_exception {
+private:
+    string msg;
+public:
+    toss_exception(string msg):msg(msg){}
+    const char* what() const { return msg.c_str(); }
+};
+
+struct TossFile {
     string path;
     long change_time;
     uintmax_t size;
-    File(string p, long c, uintmax_t s):path(p), change_time(c), size(s){}
+    TossFile(string p, long c, uintmax_t s):path(p), change_time(c), size(s){}
 };
 
 struct HumanReadable {
@@ -71,12 +79,15 @@ long getChangeTimeLong(const string& path) {
     return getChangeTimeLong(path.c_str());
 }
 
-int main(int argc, char *argv[]) {
+bool isRelativePath(const string& str) {
+    return str.rfind("/", 0) != 0 && str.rfind("~", 0) != 0 && str.rfind("\\", 0) != 0;
+}
 
-    /**
-     * @brief
-     * Build directory recycle bin in home user
-     */
+bool startsWith(const string& str, const string& prefix) {
+    return str.substr(0, prefix.size()) == prefix;
+}
+
+int main(int argc, char *argv[]) {
 
     // set home directory to environment or based on user's home directory
     string homedir, recycledir;
@@ -103,6 +114,11 @@ int main(int argc, char *argv[]) {
      * -h, --help = help 
      */
     argparse::ArgumentParser program("toss");
+
+    program.add_argument("-f", "--force")
+        .help("force toss or force recover files from recycle bin")
+        .default_value(false)
+        .implicit_value(true);
     
     program.add_argument("-l", "--list", "--list-recent")
         .help("list items in recycle bin by most recent")
@@ -147,7 +163,7 @@ int main(int argc, char *argv[]) {
     }
 
     /** List Recycle Bin **/
-    vector<File> files; 
+    vector<TossFile> files; 
     if (program["--list"]  == true || program["--list-name"]  == true || program["--list-size"] == true) { 
 
         // list header
@@ -162,7 +178,7 @@ int main(int argc, char *argv[]) {
                 long change_time = getChangeTimeLong(entry.path().string());
                 uintmax_t size = entry.file_size();
                 files.push_back({path, change_time, size});    
-            }
+            } 
         }
 
         // sort by recent
@@ -187,7 +203,7 @@ int main(int argc, char *argv[]) {
         }
         */
 
-        // list all files
+        // list all files in recycle bin
         for (const auto& file: files) {
             string path = file.path;
             string change_time = ctime(&file.change_time);
@@ -200,49 +216,141 @@ int main(int argc, char *argv[]) {
         exit(1);           
     }
 
-    // catch empty file arguments 
-    vector<string> input_files;
+    // catch file arguments 
+    vector<string> inputs;
     try {
-        input_files = program.get<vector<string>>("files");
+        inputs = program.get<vector<string>>("files");
     } catch (std::logic_error& err) {
         cerr << "No files provided" << endl;
         cerr << program << endl;
         exit(1);
     }
+
+    /* prepare source and destination file pairs
+        - if recovering, src moves from recycle bin to actual file
+        - if tossing, src moves from actual file to recycle bin 
+    */
     
-    // recover files from the recycle bin
-    /*
-    if (program["--recover"] == true) {
-        for (auto& file: input_files) {
-            string dest = "";
+    vector<pair<string, string>> src_dest_files;
+    try {
+        for (unsigned int i = 0; i < inputs.size(); ++i) {
             string src = "";
+            string dest = "";
 
-            // relative path search
-            if (file.rfind("/", 0) != 0 && file.rfind("~", 0) != 0 && file.rfind("\\", 0) != 0) {
-                dest = filesystem::current_path().string() + "/" + file;
-                cout << "relative: ";
-            } else {
-                cout << "absolute: ";
+            // do not include recycledir path in file input
+            if (startsWith(inputs[i], recycledir)) {
+                throw toss_exception("do not include recycle directory: \"" + recycledir + "\" in the filename");
+            } 
+
+            /** If recovering, source = ~/recyclebin, dest = actual path **/
+            if (program["--recover"] == true) {
+
+                // modify for relative path
+                if (isRelativePath(inputs[i])) {
+                    dest = filesystem::current_path().string() + "/" + inputs[i];
+                } else {
+                    dest = inputs[i];
+                }
+                src = recycledir + dest;
             }
-            src = recycledir + dest;
-            cout << src << " -> " << dest << endl;
 
-            // check for file existence
+            else if (program["--recover"] == false) {
 
-            if (program["--force"] && filesystem::exists(dest)) {
-                filesystem::remove(dest);
+                // modify for relative path
+                if (isRelativePath(inputs[i])) {
+                    src = filesystem::current_path().string() + "/" + inputs[i];
+                } else {
+                    src = inputs[i];
+                }
+                dest = recycledir + src;
             }
-            else if (filesystem::exists(dest)) {
-                cout << "There currently exists a file for: " << dest << endl;
+
+            /**
+             * Push back final source and destination files for tossing or recovery
+             * 1. push all non-directory files 
+             * 2. throw error if pushing directory recursively without flag
+             * 3. push regular files recursively from directory
+             */
+            if (filesystem::is_directory(src) == false) {
+                src_dest_files.push_back({src, dest});
+            } else if (program["--recursive"] == false) {
+                throw toss_exception(src + " is a directory. Use --recursive flag to include directories");
+            } else if (program["--recursive"] == true) {
+                for (const auto& entry: filesystem::recursive_directory_iterator(src)) {
+
+                    // if recovering recursively, pick recycledir as src, actual path as dest
+                    if (entry.is_regular_file() == false && startsWith(entry.path().string(), recycledir)) {
+                        string src_ = entry.path().string();
+                        src_dest_files.push_back({entry.path().string(), entry.path().string().substr(recycledir.size())});
+                    }
+
+                    // if tossing recursively, pick actual path as src, recycledir as src
+                    else if (entry.is_regular_file()) {
+                        src_dest_files.push_back({entry.path().string(), recycledir + entry.path().string()});
+                    }
+                }
+            }
+        }
+    } catch (toss_exception& err) {
+        cerr << "toss error: " << err.what() << endl;
+        exit(1);
+    }
+
+    cout << "all caught files" << endl;
+    for (auto& v: src_dest_files) {
+        cout << "src: " << v.first << " ----- " << "dest: " << v.second << endl;
+    }
+
+    /*
+     * Handle remaining toss / recover operations
+     * 
+     */
+    for (auto& file: src_dest_files) {
+        filesystem::path src = file.first;
+        filesystem::path dest = file.second;
+        
+        try {
+
+            // throw error if item doesn't exist in recycle bin to recover
+            if (filesystem::exists(src) == false && program["--recover"] == true) {
+                throw toss_exception("failed to recover - file not found in recycle bin: " + src.string());
+            }
+
+            // throw error if item doesn't exist in system to toss
+            else if (filesystem::exists(src) == false && program["--recover"] == false) {
+                throw toss_exception("failed to toss - file not found " + src.string());
+            }
+            
+            // confirm recovery if file already exists at destination
+            else if (filesystem::exists(dest) && program["--recover"] == true && program["--force"] == false) {
+                cout << "There currently exists a file you want to replace: " << dest << endl;
                 cout << "Are you sure you want to replace this? (y/n)" << endl;
                 string input;
                 cin >> input; 
                 if (input == "y" || input == "Y" || input == "yes" || input == "Yes" || input == "YES") {
-                    filesystem::remove(dest);
+                    filesystem::create_directory(dest.parent_path(), src.parent_path());
+                    filesystem::rename(src, dest);
+                } else {
+                    cout << "toss operation canceled" << endl;
+                    exit(1);
                 }
-            }
+            } 
 
+            // otherwise continue if tossing or forced flag enabled or file does not exist at destination
+            else {
+                
+                filesystem::create_directory(dest.parent_path(), src.parent_path());
+                filesystem::rename(src, dest);
+            }
+            
+        } catch(const toss_exception& err) {
+            cerr << "toss error: " << err.what() << endl;
+            exit(1);
+        } catch (const filesystem::filesystem_error& err) {
+            cerr << "filesystem error: " << err.what() << endl;
+            exit(1);
         }
     }
-    */
+
+
 }
