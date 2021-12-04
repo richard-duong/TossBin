@@ -3,9 +3,9 @@
 # setup toss
 chmod +x bin/toss
 sudo cp bin/toss /usr/local/bin
-mkdir ~/recyclebin
+mkdir ~/.recyclebin
 
 # setup cron job for automatic file deletion
-croncmd="find ~/recyclebin -mtime +30 -delete; find /tmp -mtime +30 -delete"
+croncmd="find ~/recyclebin -mtime +30 -delete;"
 cronjob="0 0 * * * $croncmd"
 ( crontab -l | grep -v -F "$croncmd" ; echo "$cronjob" ) | crontab -

@@ -95,7 +95,7 @@ int main(int argc, char *argv[]) {
         homedir = getpwuid(getuid())->pw_dir;
         // recycledir = getpwuid(getuid())->pw_dir;
     }
-    recycledir = homedir + "/recyclebin";
+    recycledir = homedir + "/.recyclebin";
 
     // build home directory
     int status = mkdir(recycledir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -135,10 +135,12 @@ int main(int argc, char *argv[]) {
         .default_value(false)
         .implicit_value(true);
 
+    /*
     program.add_argument("-g", "--regex", "--reg")
         .help("enable regex matching for files to toss/recover")
         .default_value(false)
         .implicit_value(true);
+    */
 
     program.add_argument("-r", "--recursive")
         .help("recursively toss directories into the recycle bin")
@@ -167,8 +169,8 @@ int main(int argc, char *argv[]) {
     if (program["--list"]  == true || program["--list-name"]  == true || program["--list-size"] == true) { 
 
         // list header
-        cout << left << setw(30) << "Date Tossed" << left << setw(50) << "Filename" << right << "Size" << endl;
-        cout << string(90, '=') << endl;
+        cout << left << setw(30) << "Date Tossed" << left << setw(50) << "Filename" << right << "Size" << endl << endl;
+        // cout << string(90, '=') << endl;
 
 
         // load all files in recycle bin
@@ -232,6 +234,7 @@ int main(int argc, char *argv[]) {
     */
     
     vector<pair<string, string>> src_dest_files;
+    vector<string> dirToDelete;
     try {
         for (unsigned int i = 0; i < inputs.size(); ++i) {
             string src = "";
@@ -242,7 +245,7 @@ int main(int argc, char *argv[]) {
                 throw toss_exception("do not include recycle directory: \"" + recycledir + "\" in the filename");
             } 
 
-            /** If recovering, source = ~/recyclebin, dest = actual path **/
+            /** If recovering, source = ~/.recyclebin, dest = actual path **/
             if (program["--recover"] == true) {
 
                 // modify for relative path
@@ -270,23 +273,32 @@ int main(int argc, char *argv[]) {
              * 1. push all non-directory files 
              * 2. throw error if pushing directory recursively without flag
              * 3. push regular files recursively from directory
-             */
+             * 4. at the very end delete ALL initial directories recursively, passed as inputs -> dirToDelete
+             */ 
             if (filesystem::is_directory(src) == false) {
                 src_dest_files.push_back({src, dest});
             } else if (program["--recursive"] == false) {
                 throw toss_exception(src + " is a directory. Use --recursive flag to include directories");
             } else if (program["--recursive"] == true) {
+                dirToDelete.push_back(src);
                 for (const auto& entry: filesystem::recursive_directory_iterator(src)) {
 
+                    // delete these directories after everything has been copied
+                    
+
                     // if recovering recursively, pick recycledir as src, actual path as dest
-                    if (entry.is_regular_file() == false && startsWith(entry.path().string(), recycledir)) {
+                    // might be able to remove!
+                    if (entry.is_regular_file() && startsWith(entry.path().string(), recycledir)) {
                         string src_ = entry.path().string();
-                        src_dest_files.push_back({entry.path().string(), entry.path().string().substr(recycledir.size())});
+                        string dest_ = entry.path().string().substr(recycledir.size());
+                        src_dest_files.push_back({src_, dest_});
                     }
 
                     // if tossing recursively, pick actual path as src, recycledir as src
                     else if (entry.is_regular_file()) {
-                        src_dest_files.push_back({entry.path().string(), recycledir + entry.path().string()});
+                        string src_ = entry.path().string();
+                        string dest_ = recycledir + entry.path().string();
+                        src_dest_files.push_back({src_, dest_});
                     }
                 }
             }
@@ -294,11 +306,6 @@ int main(int argc, char *argv[]) {
     } catch (toss_exception& err) {
         cerr << "toss error: " << err.what() << endl;
         exit(1);
-    }
-
-    cout << "all caught files" << endl;
-    for (auto& v: src_dest_files) {
-        cout << "src: " << v.first << " ----- " << "dest: " << v.second << endl;
     }
 
     /*
@@ -328,7 +335,7 @@ int main(int argc, char *argv[]) {
                 string input;
                 cin >> input; 
                 if (input == "y" || input == "Y" || input == "yes" || input == "Yes" || input == "YES") {
-                    filesystem::create_directory(dest.parent_path(), src.parent_path());
+                    filesystem::create_directories(dest.parent_path());
                     filesystem::rename(src, dest);
                 } else {
                     cout << "toss operation canceled" << endl;
@@ -338,8 +345,7 @@ int main(int argc, char *argv[]) {
 
             // otherwise continue if tossing or forced flag enabled or file does not exist at destination
             else {
-                
-                filesystem::create_directory(dest.parent_path(), src.parent_path());
+                filesystem::create_directories(dest.parent_path());
                 filesystem::rename(src, dest);
             }
             
@@ -352,5 +358,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // delete all input source directories afterward
+    for (auto& delDir: dirToDelete) {
+        filesystem::remove_all(delDir);
+    }
 
+    if (program["--recover"] == false) cout << "Successfully tossed " << src_dest_files.size() << " files." << endl;
+    else if (program["--recover"] == true) cout << "Successfully tossed back " << src_dest_files.size() << " files." << endl;
 }

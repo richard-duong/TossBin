@@ -2,6 +2,11 @@
 Toss is a unix command tool that allows a user to `toss` files or directories similar to the built-in `rm` command.
 However, toss is unique in that it allows users to recover the most recently tossed version of their files / directories.
 
+## Prerequisites
+1. Must have C++ on system (necessary for g++ and make)
+   a. On CentOS run: `
+
+
 ## Get Started
 1. Navigate into TossBin
 2. Run `make toss`
@@ -18,7 +23,7 @@ However, toss is unique in that it allows users to recover the most recently tos
 2. Accepts absolute and relative path inputs
 3. Has a temporary "~/recyclebin" directory to store tossed files
 4. Maintains directory structure starting from root directory "/"
-5. When recursively tossing/recovering directories
+5. When recursively tossing/recovering directoriesRRR
 6. Can list tossed files from recycle bin in several ways:
    1. List by most recently tossed
    2. List by name
